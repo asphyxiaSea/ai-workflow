@@ -14,13 +14,8 @@ class VegetationAnalysisState(TypedDict):
     gndvi_file_item: FileItem
     lci_file_item: FileItem
     config: dict[str, Any]
-    sam3_raw: NotRequired[dict[str, Any]]
     geojson: NotRequired[dict[str, Any]]
     mask: NotRequired[np.ndarray]
     ndvi_stats: NotRequired[dict[str, Any]]
     gndvi_stats: NotRequired[dict[str, Any]]
     lci_stats: NotRequired[dict[str, Any]]
-    ndvi_mean: NotRequired[float]
-    gndvi_mean: NotRequired[float]
-    lci_mean: NotRequired[float]
-    health_assessment: NotRequired[dict[str, Any]]

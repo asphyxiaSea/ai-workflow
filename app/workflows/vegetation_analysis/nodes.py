@@ -118,10 +118,7 @@ async def sam_segment_node(state: VegetationAnalysisState) -> dict[str, Any]:
     if not isinstance(geojson, dict):
         raise InvalidRequestError(message="Sam3 返回缺少 geojson", detail=payload)
 
-    return {
-        "sam3_raw": payload,
-        "geojson": geojson,
-    }
+    return {"geojson": geojson}
 
 
 async def mask_build_node(state: VegetationAnalysisState) -> dict[str, Any]:
