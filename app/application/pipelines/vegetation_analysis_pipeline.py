@@ -37,7 +37,7 @@ async def run_vegetation_analysis_pipeline(
 
     result = await graph.ainvoke(state)
     return {
-        "sam3_geojson": result.get("sam3_geojson", {}),
+        "geojson": result.get("geojson", {}),
         "index_stats": {
             "NDVI": result.get("ndvi_stats", {}),
             "GNDVI": result.get("gndvi_stats", {}),
