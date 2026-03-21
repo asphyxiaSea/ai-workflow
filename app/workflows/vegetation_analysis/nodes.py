@@ -3,16 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 import cv2
-import httpx
-import json
 import numpy as np
 
 from app.api.models import FileItem
-from app.core.errors import ExternalServiceError, InvalidRequestError
+from app.core.errors import InvalidRequestError
+from app.infra.clients.sam3_client import sam3_segment_geojson
 from app.workflows.vegetation_analysis.state import VegetationAnalysisState
-
-
-SAM3_ENDPOINT = "http://localhost:8002/sam3/image/segment/semantic/texts"
 
 
 def _draw_polygon(mask: np.ndarray, coordinates: list[Any]) -> None:
@@ -83,41 +79,10 @@ def _analyze_index(image_bgr: np.ndarray, mask: np.ndarray, index_name: str) -> 
 
 
 async def sam_segment_node(state: VegetationAnalysisState) -> dict[str, Any]:
-    origin_file_item = state["origin_file_item"]
-    content_type = origin_file_item.content_type or ""
-
-    if not content_type.startswith("image/"):
-        raise InvalidRequestError(message="不支持的图片类型", detail=content_type)
-    if not origin_file_item.data:
-        raise InvalidRequestError(message="origin_file 内容为空")
-
-    try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(
-                SAM3_ENDPOINT,
-                files={
-                    "image_file": (
-                        origin_file_item.filename,
-                        origin_file_item.data,
-                        content_type,
-                    )
-                },
-                data={"config": json.dumps(state["config"], ensure_ascii=False)},
-            )
-            resp.raise_for_status()
-            payload = resp.json()
-    except (httpx.RequestError, httpx.HTTPStatusError) as exc:
-        raise ExternalServiceError(message="Sam3 服务异常", detail=str(exc)) from exc
-
-    results = payload.get("results")
-    if not isinstance(results, list) or not results:
-        raise InvalidRequestError(message="Sam3 返回结果为空", detail=payload)
-
-    first_item = results[0] if isinstance(results[0], dict) else {}
-    geojson = first_item.get("geojson")
-    if not isinstance(geojson, dict):
-        raise InvalidRequestError(message="Sam3 返回缺少 geojson", detail=payload)
-
+    geojson = await sam3_segment_geojson(
+        file_item=state["origin_file_item"],
+        config=state["config"],
+    )
     return {"geojson": geojson}
 
 
