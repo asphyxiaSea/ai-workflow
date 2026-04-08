@@ -10,6 +10,7 @@ from app.api.router.vegetation_analysis_router import (
     router as vegetation_analysis_router,
 )
 from app.api.router.pdf_structured_router import router as pdf_structured_router
+from app.api.router.rag_router import router as rag_router
 from app.core.errors import AppError
 
 
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
     app.get("/health")(health)
     app.include_router(pdf_structured_router, prefix="/ai-workflow")
     app.include_router(vegetation_analysis_router, prefix="/ai-workflow")
+    app.include_router(rag_router, prefix="/ai-workflow")
     return app
 
 
