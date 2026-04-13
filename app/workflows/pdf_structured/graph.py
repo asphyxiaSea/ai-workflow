@@ -11,6 +11,12 @@ from app.workflows.pdf_structured.nodes import (
 from app.workflows.pdf_structured.state import PdfStructuredState
 
 
+def _route_after_extract(state: PdfStructuredState) -> str:
+    if state.get("retry_with_rec_en"):
+        return "retry_extract"
+    return "to_text_preprocess"
+
+
 def build_pdf_structured_graph():
     graph_builder = StateGraph(PdfStructuredState)
     graph_builder.add_node("pdf_preprocess", pdf_preprocess_node)
@@ -20,7 +26,14 @@ def build_pdf_structured_graph():
 
     graph_builder.add_edge(START, "pdf_preprocess")
     graph_builder.add_edge("pdf_preprocess", "extract_pdf_text")
-    graph_builder.add_edge("extract_pdf_text", "text_preprocess")
+    graph_builder.add_conditional_edges(
+        "extract_pdf_text",
+        _route_after_extract,
+        {
+            "retry_extract": "extract_pdf_text",
+            "to_text_preprocess": "text_preprocess",
+        },
+    )
     graph_builder.add_edge("text_preprocess", "structured_output")
     graph_builder.add_edge("structured_output", END)
 
