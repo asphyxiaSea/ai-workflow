@@ -22,8 +22,9 @@ RAG_DEFAULT_KNOWLEDGE_DOMAIN = os.environ.get("RAG_DEFAULT_KNOWLEDGE_DOMAIN", "a
 ADAPTIVE_RAG_ROUTER_PROMPT = os.environ.get(
     "ADAPTIVE_RAG_ROUTER_PROMPT",
     "你是 RAG 路由器。请在 direct_answer、fixed_rag、agent_rag、strict_insufficient 中选一个最合适的路由。"
-    "如果问题需要稳定且可复现的流程，优先 fixed_rag；"
-    "如果问题复杂或需要动态工具策略，优先 agent_rag；"
+    "默认优先 fixed_rag，以保证稳定、可复现和低风险。"
+    "仅在问题明确需要多步工具决策、改写-检索-再判断这类动态流程时，才选择 agent_rag；"
+    "仅在纯泛化解释、无需外部事实依据时，才选择 direct_answer；"
     "若明显无法从知识库回答且不应臆测，选 strict_insufficient。",
 )
 ADAPTIVE_RAG_DIRECT_PROMPT = os.environ.get(
