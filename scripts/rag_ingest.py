@@ -24,6 +24,8 @@ from app.core.settings import (
 
 SUPPORTED_SUFFIXES = {".txt", ".md", ".pdf"}
 
+# rag的数据准备阶段  
+# 文档清洗 -> 切片（Chunking）-> 向量化（Embedding）-> 存入向量数据库
 
 def _load_text(path: Path) -> str:
     suffix = path.suffix.lower()

@@ -12,8 +12,8 @@ from typing import Any, Awaitable, Callable, Literal
 from uuid import uuid4
 
 from app.api.models import FileItem
+from app.application.pipelines.adaptive_rag_pipeline import run_adaptive_rag_pipeline
 from app.application.pipelines.pdf_structured_pipeline import run_pdf_structured_pipeline
-from app.application.pipelines.rag_chat_pipeline import run_rag_chat_pipeline
 from app.application.pipelines.vegetation_analysis_pipeline import (
     run_vegetation_analysis_pipeline,
 )
@@ -262,7 +262,7 @@ class TaskDispatcherService:
 
 # 防御校验
 async def _run_rag_chat_task(payload: dict[str, Any]) -> dict[str, Any]:
-    return await run_rag_chat_pipeline(
+    return await run_adaptive_rag_pipeline(
         question=str(payload["question"]),
         collection_name=payload.get("collection_name"),
         knowledge_domain=payload.get("knowledge_domain"),

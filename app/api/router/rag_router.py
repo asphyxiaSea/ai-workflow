@@ -79,4 +79,5 @@ async def rag_chat_task_result(task_id: str) -> dict[str, Any]:
         "status": status,
         "answer": result.get("answer", ""),
         "citations": result.get("citations", []),
+        "trace": result.get("trace", {}),
     }

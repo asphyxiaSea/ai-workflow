@@ -19,6 +19,21 @@ RAG_CHUNK_SIZE = int(os.environ.get("RAG_CHUNK_SIZE", "800"))
 RAG_CHUNK_OVERLAP = int(os.environ.get("RAG_CHUNK_OVERLAP", "120"))
 RAG_RETRIEVAL_TOP_K = int(os.environ.get("RAG_RETRIEVAL_TOP_K", "4"))
 RAG_DEFAULT_KNOWLEDGE_DOMAIN = os.environ.get("RAG_DEFAULT_KNOWLEDGE_DOMAIN", "agriculture")
+ADAPTIVE_RAG_ROUTER_PROMPT = os.environ.get(
+    "ADAPTIVE_RAG_ROUTER_PROMPT",
+    "你是 RAG 路由器。请在 direct_answer、fixed_rag、agent_rag、strict_insufficient 中选一个最合适的路由。"
+    "如果问题需要稳定且可复现的流程，优先 fixed_rag；"
+    "如果问题复杂或需要动态工具策略，优先 agent_rag；"
+    "若明显无法从知识库回答且不应臆测，选 strict_insufficient。",
+)
+ADAPTIVE_RAG_DIRECT_PROMPT = os.environ.get(
+    "ADAPTIVE_RAG_DIRECT_PROMPT",
+    "你是企业知识助手。仅在不依赖外部事实或用户请求的是通用解释时直接作答，避免编造具体事实。",
+)
+ADAPTIVE_RAG_REWRITE_PROMPT = os.environ.get(
+    "ADAPTIVE_RAG_REWRITE_PROMPT",
+    "你是检索查询改写助手。请将用户问题改写为更适合向量检索的单句查询，保留实体名与关键约束。",
+)
 
 TASK_QUEUE_MAXSIZE = int(
     os.environ.get("TASK_QUEUE_MAXSIZE", os.environ.get("RAG_TASK_QUEUE_MAXSIZE", "100"))
