@@ -1,24 +1,18 @@
 from __future__ import annotations
 
-from functools import lru_cache
 from typing import Any, Literal, cast
 
 from langchain.agents import create_agent
-from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain.tools import tool
 from pydantic import BaseModel
 
+from app.core.model_factory import get_chat_model
 from app.core.errors import InvalidRequestError
 from app.core.settings import (
     ADAPTIVE_RAG_DIRECT_PROMPT,
     ADAPTIVE_RAG_REWRITE_PROMPT,
     ADAPTIVE_RAG_ROUTER_PROMPT,
-    DEFAULT_MAX_TOKENS,
-    DEFAULT_MODEL_NAME,
-    DEFAULT_MODEL_PROVIDER,
-    DEFAULT_TEMPERATURE,
-    OLLAMA_BASE_URL,
     RAG_CHROMA_COLLECTION,
     RAG_RETRIEVAL_TOP_K,
 )
@@ -38,17 +32,6 @@ class RouteDecision(BaseModel):
 
 class QueryRewrite(BaseModel):
     rewritten_query: str
-
-
-@lru_cache(maxsize=1)
-def _get_default_model():
-    return init_chat_model(
-        DEFAULT_MODEL_NAME,
-        model_provider=DEFAULT_MODEL_PROVIDER,
-        base_url=OLLAMA_BASE_URL,
-        temperature=DEFAULT_TEMPERATURE,
-        max_tokens=DEFAULT_MAX_TOKENS,
-    )
 
 
 def _build_trace(*, route: str, reason: str, retrieval_count: int) -> dict[str, Any]:
@@ -96,7 +79,7 @@ def _build_context_blocks(docs_with_scores: list[tuple[Any, float]]) -> str:
 
 
 async def _answer_with_context(*, question: str, rewritten_question: str, contexts: str) -> str:
-    model = _get_default_model()
+    model = get_chat_model()
     result = await model.ainvoke(
         [
             SystemMessage(
@@ -152,7 +135,7 @@ def _retrieve(
 
 
 async def route_decision_node(state: AdaptiveRagState) -> dict[str, Any]:
-    model = _get_default_model().with_structured_output(RouteDecision)
+    model = get_chat_model().with_structured_output(RouteDecision)
     decision_raw = await model.ainvoke(
         [
             SystemMessage(content=ADAPTIVE_RAG_ROUTER_PROMPT),
@@ -185,7 +168,7 @@ async def route_decision_node(state: AdaptiveRagState) -> dict[str, Any]:
 
 
 async def direct_answer_node(state: AdaptiveRagState) -> dict[str, Any]:
-    model = _get_default_model()
+    model = get_chat_model()
     result = await model.ainvoke(
         [
             SystemMessage(content=ADAPTIVE_RAG_DIRECT_PROMPT),
@@ -231,7 +214,7 @@ async def fixed_rag_node(state: AdaptiveRagState) -> dict[str, Any]:
 
 
 async def _rewrite_query(question: str) -> str:
-    model = _get_default_model().with_structured_output(QueryRewrite)
+    model = get_chat_model().with_structured_output(QueryRewrite)
     rewrite_raw = await model.ainvoke(
         [
             SystemMessage(content=ADAPTIVE_RAG_REWRITE_PROMPT),
@@ -288,7 +271,7 @@ async def agent_rag_node(state: AdaptiveRagState) -> dict[str, Any]:
             return "NO_CONTEXT"
         return _build_context_blocks(docs_with_scores)
 
-    model = _get_default_model()
+    model = get_chat_model()
     agent = create_agent(model=model, tools=[rewrite_query, retrieve_context])
     agent_result = await agent.ainvoke(
         {

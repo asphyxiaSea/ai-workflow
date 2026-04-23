@@ -2,22 +2,14 @@ from __future__ import annotations
 
 import asyncio
 from io import BytesIO
-from functools import lru_cache
 import re
 from typing import Any
 
-from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage
 from pypdf import PdfReader, PdfWriter
 from pydantic import BaseModel
 
-from app.core.settings import (
-    DEFAULT_MAX_TOKENS,
-    DEFAULT_MODEL_NAME,
-    DEFAULT_MODEL_PROVIDER,
-    DEFAULT_TEMPERATURE,
-    OLLAMA_BASE_URL,
-)
+from app.core.model_factory import get_chat_model
 from app.infra.clients.paddle_client import paddle_extract_pdf_text
 from app.workflows.pdf_structured.state import PdfStructuredState
 
@@ -27,19 +19,6 @@ TITLE_RE = re.compile(
     r"([一二三四五六七八九十]+|[（(]?[一二三四五六七八九十]+[）)])"
     r"[、.\s]+([^\n]{2,30})"
 )
-
-
-@lru_cache(maxsize=1)
-def _get_default_model():
-    return init_chat_model(
-        DEFAULT_MODEL_NAME,
-        model_provider=DEFAULT_MODEL_PROVIDER,
-        base_url=OLLAMA_BASE_URL,
-        temperature=DEFAULT_TEMPERATURE,
-        max_tokens=DEFAULT_MAX_TOKENS,
-    )
-
-
 def _parse_page_indexes(page_range: str, page_count: int) -> list[int]:
     pages: set[int] = set()
     for part in re.split(r"[，,]", page_range):
@@ -220,7 +199,7 @@ async def structured_output_node(state: PdfStructuredState) -> dict[str, dict[st
         HumanMessage(content=f"Please extract structured data from this text:\n\n{extracted_text}"),
     ]
 
-    model = _get_default_model().with_structured_output(schema_model)
+    model = get_chat_model().with_structured_output(schema_model)
     result = await model.ainvoke(messages)
 
     if isinstance(result, BaseModel):
