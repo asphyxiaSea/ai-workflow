@@ -47,6 +47,51 @@ def _extract_route_reason(state: AdaptiveRagState) -> str:
     return reason.strip() or "路由模型未提供原因"
 
 
+def _current_question(state: AdaptiveRagState) -> str:
+    for message in reversed(state["messages"]):
+        if isinstance(message, HumanMessage):
+            content = str(message.content).strip()
+            if content:
+                return content
+    raise InvalidRequestError(message="messages 中缺少有效用户问题")
+
+
+def _conversation_preview(state: AdaptiveRagState, *, max_turns: int = 8) -> str:
+    lines: list[str] = []
+    for message in state["messages"][-max_turns:]:
+        if isinstance(message, HumanMessage):
+            lines.append(f"用户：{str(message.content).strip()}")
+        elif isinstance(message, AIMessage):
+            lines.append(f"助手：{str(message.content).strip()}")
+        elif isinstance(message, SystemMessage):
+            lines.append(f"系统：{str(message.content).strip()}")
+
+    return "\n".join(line for line in lines if line.strip())
+
+
+def _messages_for_direct_answer(state: AdaptiveRagState) -> list[BaseMessage]:
+    # Reuse existing dialogue turns so direct-answer mode remains conversational.
+    turns: list[BaseMessage] = [
+        message for message in state["messages"] if not isinstance(message, SystemMessage)
+    ]
+    if not turns:
+        turns = [HumanMessage(content=_current_question(state))]
+    return turns
+
+
+def _messages_for_agent(state: AdaptiveRagState) -> list[dict[str, str]]:
+    messages: list[dict[str, str]] = []
+    for message in state["messages"]:
+        content = str(message.content).strip()
+        if not content:
+            continue
+        if isinstance(message, HumanMessage):
+            messages.append({"role": "user", "content": content})
+        elif isinstance(message, AIMessage):
+            messages.append({"role": "assistant", "content": content})
+    return messages
+
+
 def _extract_final_text(messages: list[BaseMessage]) -> str:
     for message in reversed(messages):
         if isinstance(message, AIMessage):
@@ -78,7 +123,13 @@ def _build_context_blocks(docs_with_scores: list[tuple[Any, float]]) -> str:
     return "\n\n".join(contexts)
 
 
-async def _answer_with_context(*, question: str, rewritten_question: str, contexts: str) -> str:
+async def _answer_with_context(
+    *,
+    question: str,
+    rewritten_question: str,
+    contexts: str,
+    dialogue_context: str,
+) -> str:
     model = get_chat_model()
     result = await model.ainvoke(
         [
@@ -92,6 +143,7 @@ async def _answer_with_context(*, question: str, rewritten_question: str, contex
             ),
             HumanMessage(
                 content=(
+                    f"多轮对话：\n{dialogue_context}\n\n"
                     f"原始问题：{question}\n"
                     f"改写检索问题：{rewritten_question}\n\n"
                     "可用上下文如下：\n"
@@ -135,11 +187,19 @@ def _retrieve(
 
 
 async def route_decision_node(state: AdaptiveRagState) -> dict[str, Any]:
+    question = _current_question(state)
+    dialogue_context = _conversation_preview(state)
     model = get_chat_model().with_structured_output(RouteDecision)
     decision_raw = await model.ainvoke(
         [
             SystemMessage(content=ADAPTIVE_RAG_ROUTER_PROMPT),
-            HumanMessage(content=f"用户问题：{state['question']}"),
+            HumanMessage(
+                content=(
+                    "请基于对话上下文判断路由策略。\n"
+                    f"对话上下文：\n{dialogue_context}\n\n"
+                    f"当前问题：{question}"
+                )
+            ),
         ]
     )
 
@@ -172,12 +232,14 @@ async def direct_answer_node(state: AdaptiveRagState) -> dict[str, Any]:
     result = await model.ainvoke(
         [
             SystemMessage(content=ADAPTIVE_RAG_DIRECT_PROMPT),
-            HumanMessage(content=state["question"]),
+            *_messages_for_direct_answer(state),
         ]
     )
     reason = _extract_route_reason(state)
+    answer = str(result.content)
     return {
-        "answer": str(result.content),
+        "answer": answer,
+        "messages": [AIMessage(content=answer)],
         "citations": [],
         "retrieval_count": 0,
         "trace": _build_trace(route="direct_answer", reason=reason, retrieval_count=0),
@@ -185,8 +247,10 @@ async def direct_answer_node(state: AdaptiveRagState) -> dict[str, Any]:
 
 
 async def fixed_rag_node(state: AdaptiveRagState) -> dict[str, Any]:
+    question = _current_question(state)
+    dialogue_context = _conversation_preview(state)
     docs_with_scores, citations = _retrieve(
-        query=state["question"],
+        query=question,
         collection_name=state.get("collection_name"),
         knowledge_domain=state.get("knowledge_domain"),
         book_id=state.get("book_id"),
@@ -198,15 +262,17 @@ async def fixed_rag_node(state: AdaptiveRagState) -> dict[str, Any]:
     else:
         contexts = _build_context_blocks(docs_with_scores)
         answer = await _answer_with_context(
-            question=state["question"],
-            rewritten_question=state["question"].strip(),
+            question=question,
+            rewritten_question=question,
             contexts=contexts,
+            dialogue_context=dialogue_context,
         )
 
     reason = _extract_route_reason(state)
     retrieval_count = 1
     return {
         "answer": answer,
+        "messages": [AIMessage(content=answer)],
         "citations": citations,
         "retrieval_count": retrieval_count,
         "trace": _build_trace(route="fixed_rag", reason=reason, retrieval_count=retrieval_count),
@@ -239,9 +305,11 @@ async def _rewrite_query(question: str) -> str:
 
 async def agent_rag_node(state: AdaptiveRagState) -> dict[str, Any]:
     reason = _extract_route_reason(state)
+    question = _current_question(state)
+    dialogue_context = _conversation_preview(state)
 
     runtime: dict[str, Any] = {
-        "rewritten_question": state["question"].strip(),
+        "rewritten_question": question,
         "docs_with_scores": [],
         "citations": [],
         "retrieval_count": 0,
@@ -273,6 +341,10 @@ async def agent_rag_node(state: AdaptiveRagState) -> dict[str, Any]:
 
     model = get_chat_model()
     agent = create_agent(model=model, tools=[rewrite_query, retrieve_context])
+    agent_messages = _messages_for_agent(state)
+    if not agent_messages:
+        agent_messages = [{"role": "user", "content": question}]
+
     agent_result = await agent.ainvoke(
         {
             "messages": [
@@ -286,8 +358,8 @@ async def agent_rag_node(state: AdaptiveRagState) -> dict[str, Any]:
                         "答案请精炼，并在末尾给出引用编号，如 [1][2]。"
                     ),
                 },
-                {"role": "user", "content": state["question"]},
-            ]
+                *agent_messages,
+            ],
         },
         config={"recursion_limit": 8},
     )
@@ -305,9 +377,10 @@ async def agent_rag_node(state: AdaptiveRagState) -> dict[str, Any]:
         else:
             contexts = _build_context_blocks(docs_with_scores)
             answer = await _answer_with_context(
-                question=state["question"],
+                question=question,
                 rewritten_question=rewritten_question,
                 contexts=contexts,
+                dialogue_context=dialogue_context,
             )
 
     return {
@@ -316,6 +389,7 @@ async def agent_rag_node(state: AdaptiveRagState) -> dict[str, Any]:
         "citations": citations,
         "retrieval_count": retrieval_count,
         "answer": answer,
+        "messages": [AIMessage(content=answer)],
         "trace": _build_trace(
             route="agent_rag",
             reason=reason,
@@ -326,8 +400,10 @@ async def agent_rag_node(state: AdaptiveRagState) -> dict[str, Any]:
 
 async def strict_insufficient_node(state: AdaptiveRagState) -> dict[str, Any]:
     reason = _extract_route_reason(state)
+    answer = "依据不足，当前无法给出可靠答案。"
     return {
-        "answer": "依据不足，当前无法给出可靠答案。",
+        "answer": answer,
+        "messages": [AIMessage(content=answer)],
         "citations": [],
         "retrieval_count": 0,
         "trace": _build_trace(route="strict_insufficient", reason=reason, retrieval_count=0),

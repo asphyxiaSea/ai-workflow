@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
+from typing import Any, Annotated, Literal, TypedDict
 from typing_extensions import NotRequired
 
 from langchain_core.documents import Document
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
 
 
 RagRoute = Literal[
@@ -15,7 +17,7 @@ RagRoute = Literal[
 
 
 class AdaptiveRagState(TypedDict):
-    question: str
+    messages: Annotated[list[BaseMessage], add_messages]
     collection_name: NotRequired[str]
     knowledge_domain: NotRequired[str]
     book_id: NotRequired[str]

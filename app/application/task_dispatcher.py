@@ -262,8 +262,21 @@ class TaskDispatcherService:
 
 # 防御校验
 async def _run_rag_chat_task(payload: dict[str, Any]) -> dict[str, Any]:
+    thread_id = payload.get("thread_id")
+    user_id = payload.get("user_id")
+    messages = payload.get("messages")
+
+    if not isinstance(thread_id, str) or not thread_id.strip():
+        raise InvalidRequestError(message="thread_id 缺失或非法")
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise InvalidRequestError(message="user_id 缺失或非法")
+    if not isinstance(messages, list) or not messages:
+        raise InvalidRequestError(message="messages 缺失或非法")
+
     return await run_adaptive_rag_pipeline(
-        question=str(payload["question"]),
+        messages=messages,
+        thread_id=thread_id,
+        user_id=user_id,
         collection_name=payload.get("collection_name"),
         knowledge_domain=payload.get("knowledge_domain"),
         book_id=payload.get("book_id"),

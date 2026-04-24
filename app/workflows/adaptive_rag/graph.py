@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from typing import Any
+
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from app.workflows.adaptive_rag.nodes import (
@@ -13,7 +16,15 @@ from app.workflows.adaptive_rag.nodes import (
 from app.workflows.adaptive_rag.state import AdaptiveRagState
 
 
+_adaptive_rag_graph: Any | None = None
+_adaptive_rag_checkpointer = InMemorySaver()
+
+
 def build_adaptive_rag_graph():
+    global _adaptive_rag_graph
+    if _adaptive_rag_graph is not None:
+        return _adaptive_rag_graph
+
     graph_builder = StateGraph(AdaptiveRagState)
     graph_builder.add_node("route_decision", route_decision_node)
     graph_builder.add_node("direct_answer", direct_answer_node)
@@ -38,4 +49,5 @@ def build_adaptive_rag_graph():
     graph_builder.add_edge("agent_rag", END)
     graph_builder.add_edge("strict_insufficient", END)
 
-    return graph_builder.compile()
+    _adaptive_rag_graph = graph_builder.compile(checkpointer=_adaptive_rag_checkpointer)
+    return _adaptive_rag_graph
