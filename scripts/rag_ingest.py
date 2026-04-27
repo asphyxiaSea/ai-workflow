@@ -2,29 +2,27 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 from pathlib import Path
 
 from langchain_core.documents import Document
 from langchain_ollama import OllamaEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
-
-from app.core.settings import (
-    OLLAMA_BASE_URL,
-    RAG_CHROMA_COLLECTION,
-    RAG_CHROMA_PERSIST_DIR,
-    RAG_CHUNK_OVERLAP,
-    RAG_CHUNK_SIZE,
-    RAG_DEFAULT_KNOWLEDGE_DOMAIN,
-    RAG_EMBEDDING_BASE_URL,
-    RAG_EMBEDDING_MODEL,
-)
 
 
 SUPPORTED_SUFFIXES = {".txt", ".md", ".pdf"}
 
-# rag的数据准备阶段  
+DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
+DEFAULT_CHROMA_COLLECTION = "rag_default"
+DEFAULT_CHROMA_PERSIST_DIR = "./.chroma"
+DEFAULT_CHUNK_SIZE = 1000
+DEFAULT_CHUNK_OVERLAP = 200
+DEFAULT_KNOWLEDGE_DOMAIN = "general"
+DEFAULT_EMBEDDING_MODEL = "nomic-embed-text"
+
+# rag的数据准备阶段
 # 文档清洗 -> 切片（Chunking）-> 向量化（Embedding）-> 存入向量数据库
 
 def _load_text(path: Path) -> str:
@@ -37,14 +35,21 @@ def _load_text(path: Path) -> str:
         return f.read().strip()
 
 
-def _build_chunks(path: Path, *, knowledge_domain: str, book_id: str) -> list[Document]:
+def _build_chunks(
+    path: Path,
+    *,
+    knowledge_domain: str,
+    book_id: str,
+    chunk_size: int,
+    chunk_overlap: int,
+) -> list[Document]:
     text = _load_text(path)
     if not text:
         return []
 
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=RAG_CHUNK_SIZE,
-        chunk_overlap=RAG_CHUNK_OVERLAP,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
     )
     source_doc = Document(
         page_content=text,
@@ -71,15 +76,21 @@ def _resolve_book_id(path: Path, custom_book_id: str | None) -> str:
     return path.stem
 
 
-def _get_store(collection_name: str | None) -> Chroma:
+def _get_store(
+    *,
+    collection_name: str,
+    embedding_model: str,
+    embedding_base_url: str,
+    persist_directory: str,
+) -> Chroma:
     embedding = OllamaEmbeddings(
-        model=RAG_EMBEDDING_MODEL,
-        base_url=RAG_EMBEDDING_BASE_URL or OLLAMA_BASE_URL,
+        model=embedding_model,
+        base_url=embedding_base_url,
     )
     return Chroma(
-        collection_name=collection_name or RAG_CHROMA_COLLECTION,
+        collection_name=collection_name,
         embedding_function=embedding,
-        persist_directory=RAG_CHROMA_PERSIST_DIR,
+        persist_directory=persist_directory,
     )
 
 
@@ -98,11 +109,21 @@ def _iter_files(input_path: Path) -> list[Path]:
 
 async def _ingest_files(
     paths: list[Path],
-    collection_name: str | None,
+    collection_name: str,
     knowledge_domain: str,
     book_id: str | None,
+    embedding_model: str,
+    embedding_base_url: str,
+    persist_directory: str,
+    chunk_size: int,
+    chunk_overlap: int,
 ) -> None:
-    store = _get_store(collection_name)
+    store = _get_store(
+        collection_name=collection_name,
+        embedding_model=embedding_model,
+        embedding_base_url=embedding_base_url,
+        persist_directory=persist_directory,
+    )
     total_chunks = 0
     total_inserted = 0
 
@@ -113,6 +134,8 @@ async def _ingest_files(
             path,
             knowledge_domain=knowledge_domain,
             book_id=resolved_book_id,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
         )
         chunk_count = len(chunks)
         if chunk_count == 0:
@@ -126,11 +149,10 @@ async def _ingest_files(
         total_inserted += inserted_count
         print(
             f"[OK] {path}: chunk_count={chunk_count}, inserted_count={inserted_count}, "
-            f"collection={collection_name or RAG_CHROMA_COLLECTION}, "
+            f"collection={collection_name}, "
             f"domain={knowledge_domain}, book_id={resolved_book_id}"
         )
 
-    await asyncio.to_thread(store.persist)
     print(
         f"Done. files={len(paths)}, total_chunks={total_chunks}, total_inserted={total_inserted}"
     )
@@ -139,16 +161,51 @@ async def _ingest_files(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Offline ingest files into Chroma for RAG")
     parser.add_argument("--input", required=True, help="A file or a directory path")
-    parser.add_argument("--collection", default=None, help="Optional Chroma collection name")
+    parser.add_argument(
+        "--collection",
+        default=os.getenv("RAG_CHROMA_COLLECTION", DEFAULT_CHROMA_COLLECTION),
+        help="Chroma collection name",
+    )
     parser.add_argument(
         "--domain",
-        default=RAG_DEFAULT_KNOWLEDGE_DOMAIN,
+        default=os.getenv("RAG_DEFAULT_KNOWLEDGE_DOMAIN", DEFAULT_KNOWLEDGE_DOMAIN),
         help="Knowledge domain metadata for retrieval filtering",
     )
     parser.add_argument(
         "--book-id",
         default=None,
         help="Optional book id metadata. If omitted, each file uses its stem as book_id",
+    )
+    parser.add_argument(
+        "--embedding-model",
+        default=os.getenv("RAG_EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL),
+        help="Embedding model name for Ollama",
+    )
+    parser.add_argument(
+        "--embedding-base-url",
+        default=(
+            os.getenv("RAG_EMBEDDING_BASE_URL")
+            or os.getenv("OLLAMA_BASE_URL")
+            or DEFAULT_OLLAMA_BASE_URL
+        ),
+        help="Ollama base URL used by embedding model",
+    )
+    parser.add_argument(
+        "--persist-dir",
+        default=os.getenv("RAG_CHROMA_PERSIST_DIR", DEFAULT_CHROMA_PERSIST_DIR),
+        help="Chroma persist directory",
+    )
+    parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=int(os.getenv("RAG_CHUNK_SIZE", str(DEFAULT_CHUNK_SIZE))),
+        help="Chunk size for text splitting",
+    )
+    parser.add_argument(
+        "--chunk-overlap",
+        type=int,
+        default=int(os.getenv("RAG_CHUNK_OVERLAP", str(DEFAULT_CHUNK_OVERLAP))),
+        help="Chunk overlap for text splitting",
     )
     return parser.parse_args()
 
@@ -164,7 +221,19 @@ def main() -> None:
     if not paths:
         raise ValueError("No supported files found. Use .txt/.md/.pdf")
 
-    asyncio.run(_ingest_files(paths, args.collection, args.domain, args.book_id))
+    asyncio.run(
+        _ingest_files(
+            paths,
+            args.collection,
+            args.domain,
+            args.book_id,
+            args.embedding_model,
+            args.embedding_base_url,
+            args.persist_dir,
+            args.chunk_size,
+            args.chunk_overlap,
+        )
+    )
 
 
 if __name__ == "__main__":

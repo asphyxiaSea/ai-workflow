@@ -3,3 +3,4 @@
 *.png
 test.py
 assets/
+chroma_db/

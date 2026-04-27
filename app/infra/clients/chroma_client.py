@@ -3,9 +3,9 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any
 
+from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_ollama import OllamaEmbeddings
-from langchain_community.vectorstores import Chroma
 
 from app.core.settings import (
     RAG_CHROMA_COLLECTION,
