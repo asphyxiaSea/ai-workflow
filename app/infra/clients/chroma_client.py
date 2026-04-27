@@ -15,6 +15,18 @@ from app.core.settings import (
 )
 
 
+def _build_chroma_where_filter(metadata_filter: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not metadata_filter:
+        return None
+
+    items = [(key, value) for key, value in metadata_filter.items() if value is not None]
+    if not items:
+        return None
+
+    # Use a single explicit operator to match new Chroma where-clause semantics.
+    return {"$and": [{key: value} for key, value in items]}
+
+
 @lru_cache(maxsize=1)
 def get_chroma_store(collection_name: str = RAG_CHROMA_COLLECTION) -> Chroma:
     embedding = OllamaEmbeddings(
@@ -36,10 +48,11 @@ def search_chroma(
     metadata_filter: dict[str, Any] | None = None,
 ) -> list[tuple[Document, float]]:
     store = get_chroma_store(collection_name)
+    where_filter = _build_chroma_where_filter(metadata_filter)
     return store.similarity_search_with_relevance_scores(
         query=query,
         k=top_k,
-        filter=metadata_filter,
+        filter=where_filter,
     )
 
 
